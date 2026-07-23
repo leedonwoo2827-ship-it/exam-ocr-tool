@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OCR 검수 도구</title>
+<style>
+  :root { --bd:#d0d5dd; --bg:#f7f8fa; --pri:#2563eb; --ok:#059669; --warn:#d97706; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Malgun Gothic", system-ui, sans-serif; background:var(--bg); color:#111; }
+  header { position:sticky; top:0; z-index:20; background:#fff; border-bottom:1px solid var(--bd);
+           display:flex; align-items:center; gap:10px; padding:8px 14px; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0 10px 0 0; }
+  button { font:inherit; padding:5px 10px; border:1px solid var(--bd); background:#fff; border-radius:6px; cursor:pointer; }
+  button.pri { background:var(--pri); color:#fff; border-color:var(--pri); }
+  button.ok  { background:var(--ok); color:#fff; border-color:var(--ok); }
+  button:disabled { opacity:.5; cursor:default; }
+  .sp { flex:1; }
+  #status { font-size:12px; color:#666; }
+
+  /* dashboard */
+  #dash { padding:14px; }
+  .round-block { margin-bottom:18px; }
+  .round-block h2 { font-size:14px; margin:0 0 6px; }
+  .grid { display:flex; flex-wrap:wrap; gap:6px; }
+  .cell { width:70px; height:58px; border:1px solid var(--bd); border-radius:6px; background:#fff;
+          display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; font-size:11px; }
+  .cell .pg { font-weight:bold; font-size:12px; }
+  .cell.draft { border-color:var(--warn); background:#fff8ee; }
+  .cell.done  { border-color:var(--ok); background:#eafaf3; }
+  .cell small { color:#666; }
+
+  /* review: 좌 OCR / 우 MDs (+옵션 스캔) */
+  #review { display:none; grid-template-columns: minmax(240px, 0.75fr) 1.9fr; height: calc(100vh - 49px); }
+  #review.showscan { grid-template-columns: minmax(220px,0.6fr) 0.9fr 1.6fr; }
+  #review.noocr { grid-template-columns: 1fr; }
+  #review.noocr.showscan { grid-template-columns: minmax(220px,0.7fr) 1.9fr; }
+  #review.noocr #ocrpane { display:none; }
+  #imgpane { overflow:auto; background:#333; position:relative; display:none; }
+  #review.showscan #imgpane { display:block; }
+  #ocrpane { display:flex; flex-direction:column; border-right:1px solid var(--bd); background:#fff; }
+  .panehd { font-size:12px; font-weight:bold; padding:6px 10px; background:#eef2ff; border-bottom:1px solid var(--bd); display:flex; gap:8px; align-items:center; }
+  #ocrText { flex:1; width:100%; border:0; padding:10px; font-family:Consolas,monospace; font-size:12px; line-height:1.5; resize:none; outline:none; }
+  #imgwrap { position:relative; display:inline-block; }
+  #scan { display:block; max-width:none; }
+  #sel { position:absolute; border:2px solid #f43f5e; background:rgba(244,63,94,.15); display:none; pointer-events:none; }
+  #edit { overflow:auto; padding:12px; }
+  .q { border:1px solid var(--bd); border-radius:8px; background:#fff; padding:10px; margin-bottom:12px; }
+  .q.verified { background:#fffbeb; border-color:#eab308; box-shadow:0 0 0 3px #fde68a; }
+  .q .chk { display:flex; align-items:center; gap:3px; font-size:12px; color:#92400e; white-space:nowrap; }
+  .q .chk input { width:15px; height:15px; }
+  .assets { border:1px dashed #c7d2fe; background:#f8faff; border-radius:6px; padding:6px 8px; margin:6px 0; }
+  .assets .ahead { font-size:12px; font-weight:bold; color:#3730a3; display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:4px; }
+  .asset { border:1px solid var(--bd); border-radius:5px; background:#fff; padding:5px 6px; margin:4px 0; }
+  .asset .arow { display:flex; gap:6px; align-items:center; margin-bottom:3px; }
+  .asset input[type=text], .asset textarea { width:100%; font:inherit; padding:3px 5px; border:1px solid var(--bd); border-radius:4px; }
+  .asset textarea { min-height:34px; resize:vertical; font-family:Consolas,monospace; font-size:12px; }
+  button.tok { font-family:Consolas,monospace; font-size:11px; background:#eef2ff; border:1px solid #c7d2fe; color:#3730a3; padding:1px 6px; border-radius:4px; cursor:pointer; }
+  .q .row { display:flex; gap:6px; align-items:center; margin-bottom:6px; flex-wrap:wrap; }
+  .q label { font-size:11px; color:#555; }
+  .q input[type=text], .q input[type=number], .q select, .q textarea {
+     font:inherit; padding:4px 6px; border:1px solid var(--bd); border-radius:5px; }
+  .q textarea { width:100%; resize:vertical; }
+  .q .stem { min-height:52px; }
+  .q .choice { display:flex; gap:6px; align-items:flex-start; margin-bottom:4px; }
+  .q .choice span { width:18px; text-align:center; padding-top:5px; }
+  .q .choice textarea { flex:1; resize:none; overflow:hidden; min-height:30px; line-height:1.45; white-space:pre-wrap; word-break:break-word; }
+  .q .stem { resize:none; overflow:hidden; }
+  .q textarea { width:100%; }
+  .q .small textarea { min-height:38px; }
+  .q .qhead { font-weight:bold; }
+  .figrow { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .figrow img { height:54px; border:1px solid var(--bd); }
+  .muted { color:#888; font-size:11px; }
+  details > summary { cursor:pointer; font-size:12px; color:#555; margin:4px 0; }
+  .toolbar { position:sticky; top:0; background:#fff; padding-bottom:8px; z-index:5; }
+  .badge { font-size:10px; padding:1px 5px; border-radius:8px; background:#eee; }
+  /* 미리보기(렌더) */
+  .preview { border:1px solid var(--bd); background:#fafafa; padding:12px 14px; margin-top:8px; border-radius:6px; font-size:16px; line-height:1.65; }
+  .preview h4 { margin:12px 0 5px; font-size:13px; color:#2563eb; border-bottom:1px solid #e5e7eb; padding-bottom:2px; }
+  .preview h4:first-child { margin-top:0; }
+  .preview .code { background:transparent; color:#111; border:1px solid #c4c4c4; padding:9px 11px; border-radius:4px; overflow-x:auto; font-family:Consolas,monospace; font-size:14px; white-space:pre; }
+  .preview .code.textbox { font-family:inherit; white-space:pre-wrap; font-size:16px; }
+  .preview .sql-kw { color:#2563eb; font-weight:600; }
+  .preview .sql-st { color:#059669; }
+  .preview .sql-cm { color:#9ca3af; font-style:italic; }
+  .preview table.tbl { border-collapse:collapse; margin:6px 0; }
+  .preview .tbl th, .preview .tbl td { border:1px solid #bbb; padding:4px 10px; font-size:14px; text-align:left; }
+  .preview .tbl th { background:#eef2ff; }
+  .preview .cap { font-size:12px; color:#888; margin-bottom:6px; }
+  .preview ol { margin:4px 0 4px 22px; padding:0; }
+  .preview ol li { margin:2px 0; }
+  .preview img { max-width:100%; border:1px solid var(--bd); margin:4px 0; }
+  .preview p { margin:7px 0; font-size:16px; }
+  .preview p.choice-line { font-size:18px; margin:9px 0; }
+  .preview .pv-qno { font-size:30px; font-weight:800; color:#111; margin:0 0 8px; line-height:1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>OCR 검수</h1>
+  <button id="btnDash">← 대시보드</button>
+  <button id="btnPrev">◀ 이전</button>
+  <span id="pglabel" class="muted"></span>
+  <button id="btnNext">다음 ▶</button>
+  <div class="sp"></div>
+  <button id="btnOcr">OCR원문 접기</button>
+  <button id="btnScan">스캔 보기</button>
+  <label class="muted">확대<input id="zoom" type="range" min="0.4" max="2" step="0.1" value="0.9" style="vertical-align:middle"></label>
+  <button id="btnAdd">＋ 문제 추가</button>
+  <button id="btnSaveDraft">초안 저장</button>
+  <button id="btnFinalize" class="ok">확정(MD 저장)</button>
+  <span id="status"></span>
+</header>
+
+<div id="dash">불러오는 중…</div>
+
+<div id="review">
+  <div id="imgpane">
+    <div id="imgwrap"><img id="scan" alt="scan"><div id="sel"></div></div>
+  </div>
+  <div id="ocrpane">
+    <div class="panehd">OCR 원문 (페이지 판독) <span class="muted" id="ocrmeta"></span></div>
+    <textarea id="ocrText" placeholder="이 페이지의 OCR 원문 (Claude 판독). 우측 MD로 분할·정리하세요."></textarea>
+  </div>
+  <div id="edit">
+    <div class="toolbar">
+      <div class="row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label>회차 <input id="pRound" type="number" min="1" max="7" style="width:56px"></label>
+        <label>정답키줄 <input id="pKey" type="text" style="width:240px" placeholder="정답 01③ 02④ …"></label>
+        <button id="btnApplyKey">정답키→문제 반영</button>
+      </div>
+      <div class="muted">이미지에서 드래그 → 영역 선택 후, 원하는 문제의 [그림 추가] 클릭. 문항번호 오름차순으로 저장됩니다.</div>
+    </div>
+    <div id="qlist"></div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const api = (u,o) => fetch(u,o).then(r=>r.json());
+let cur = null;         // {src, page}
+let draft = null;       // current draft object
+let pendingBox = null;  // [x,y,w,h] in native px
+const CIRC = ["①","②","③","④"];
+
+function setStatus(t, ok){ $("#status").textContent=t; $("#status").style.color = ok?"#059669":"#666"; }
+
+// ---------- 미리보기 렌더 (마크다운→HTML, 우리 하위집합) ----------
+function figSrc(q, f){
+  if(f.bbox) return `/api/crop?src=${cur.src}&page=${cur.page}&x=${f.bbox[0]}&y=${f.bbox[1]}&w=${f.bbox[2]}&h=${f.bbox[3]}`;
+  if(f.path) return `/img/${f.path.split('/').pop()}`;
+  return '';
+}
+function assetMd(q, id){
+  const a=(q.assets||{})[id]; if(!a) return "{{"+id+"}}";
+  if(a.type==='table') return (a.title?`**${a.title}**\n\n`:'')+(a.md||'');
+  if(a.type==='sql'||a.type==='box') return "```sql\n"+(a.text||'')+"\n```";
+  if(a.type==='figure'){ const src=figSrc(q,a); return src?`![${a.note||''}](${src})`:''; }
+  if(a.type==='text') return "```text\n"+(a.text||'')+"\n```";
+  return '';
+}
+function expandTokens(text, q){
+  return (text||"").replace(/\{\{([A-Za-z]+-\d+)\}\}/g, (m,id)=>assetMd(q,id));
+}
+function questionToMd(q){
+  if(q.assets && Object.keys(q.assets).length){
+    let s="## 문제\n"+expandTokens(q.stem||"",q)+"\n\n";
+    const jm=expandTokens(q.jimun||"",q);
+    if(jm.trim()) s+="## 지문\n"+jm+"\n\n";
+    s+="## 보기\n"+[0,1,2,3].map(c=>{
+      const ex=expandTokens((q.choices&&q.choices[c])||"",q);
+      return /\n|^\s*(\*\*|\||```|!\[)/.test(ex)?`${CIRC[c]}\n\n${ex}`:`${CIRC[c]} ${ex}`;
+    }).join("\n\n")+"\n\n";
+    const exp=expandTokens(q.explanation||"",q);
+    if(exp.trim()) s+="## 해설\n"+exp;
+    return s;
+  }
+  let s = "## 문제\n"+(q.stem||"")+"\n\n";
+  const figs=q.figures||[];
+  const stemFigs=figs.filter(f=>(f.placement||'지문')!=='해설');
+  const explFigs=figs.filter(f=>(f.placement||'지문')==='해설');
+  const sqlExpl=(q.sql_placement||'지문')==='해설', tblExpl=(q.tables_placement||'지문')==='해설';
+  let jimun=[];
+  if(q.sql && !sqlExpl) jimun.push("```sql\n"+q.sql+"\n```");
+  if(q.tables && !tblExpl) jimun.push(q.tables);
+  stemFigs.forEach(f=>{ const src=figSrc(q,f); if(src) jimun.push(`![${f.note||''}](${src})`); });
+  if(jimun.length) s+="## 지문\n"+jimun.join("\n\n")+"\n\n";
+  s+="## 보기\n"+[0,1,2,3].map(c=>`${c+1}. ${(q.choices&&q.choices[c])||''}`).join("\n")+"\n\n";
+  let expl=[];
+  if(q.explanation) expl.push(q.explanation);
+  if(q.sql && sqlExpl) expl.push("```sql\n"+q.sql+"\n```");
+  if(q.tables && tblExpl) expl.push(q.tables);
+  explFigs.forEach(f=>{ const src=figSrc(q,f); if(src) expl.push(`![${f.note||''}](${src})`); });
+  if(expl.length) s+="## 해설\n"+expl.join("\n\n");
+  return s;
+}
+function esc(s){ return (s||"").replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+const SQL_KW=new Set(("SELECT FROM WHERE AND OR NOT IN IS NULL LIKE INSERT INTO VALUES UPDATE SET DELETE CREATE TABLE ALTER ADD COLUMN MODIFY DROP CONSTRAINT PRIMARY KEY FOREIGN REFERENCES DEFAULT GROUP BY ORDER HAVING JOIN INNER LEFT RIGHT FULL OUTER CROSS ON UNION ALL MINUS INTERSECT AS DISTINCT CASE WHEN THEN ELSE END OVER PARTITION RANGE ROWS BETWEEN PRECEDING FOLLOWING UNBOUNDED CURRENT ROW CONNECT START WITH PRIOR COMMIT ROLLBACK SAVEPOINT TRUNCATE GRANT REVOKE ROLLUP CUBE GROUPING SETS DESC ASC").split(" "));
+function hlSql(code){
+  const re=/('(?:[^']|'')*')|(--[^\n]*)|([A-Za-z_][A-Za-z0-9_]*)|([\s\S])/g;
+  let out="", m;
+  while((m=re.exec(code))){
+    if(m[1]) out+=`<span class="sql-st">${esc(m[1])}</span>`;
+    else if(m[2]) out+=`<span class="sql-cm">${esc(m[2])}</span>`;
+    else if(m[3]) out+= SQL_KW.has(m[3].toUpperCase()) ? `<span class="sql-kw">${esc(m[3])}</span>` : esc(m[3]);
+    else out+=esc(m[4]);
+  }
+  return out;
+}
+function inl(s){ return esc(s).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/&lt;br\s*\/?&gt;/gi,'<br>'); }
+function renderTable(rows){
+  const cells=rows.map(r=>r.trim().replace(/^\||\|$/g,'').split('|').map(c=>c.trim()));
+  const body=cells.filter((r,idx)=> !(idx===1 && r.every(c=>/^:?-+:?$/.test(c))) );
+  if(!body.length) return '';
+  const head=body[0], rest=body.slice(1);
+  return `<table class="tbl"><thead><tr>${head.map(c=>`<th>${inl(c)}</th>`).join("")}</tr></thead><tbody>${
+    rest.map(r=>`<tr>${r.map(c=>`<td>${inl(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+}
+function mdToHtml(md){
+  const L=md.split("\n"); let h="", i=0, sec="";
+  while(i<L.length){
+    let ln=L[i];
+    if(ln.startsWith("```")){ const lang=ln.slice(3).trim(); const code=[]; i++; while(i<L.length && !L[i].startsWith("```")){ code.push(L[i]); i++; } i++;
+      h+= lang==="text" ? `<pre class="code textbox">${inl(code.join("\n"))}</pre>` : `<pre class="code">${hlSql(code.join("\n"))}</pre>`; continue; }
+    let m;
+    if((m=ln.match(/^(#{1,6})\s+(.*)$/))){ sec=m[2].trim(); if(sec==="해설") h+=`<h4>${inl(m[2])}</h4>`; i++; continue; }
+    if((m=ln.match(/^!\[(.*?)\]\((.*?)\)/))){ h+=`<img src="${m[2]}">`+(m[1]?`<div class="cap">${esc(m[1])}</div>`:''); i++; continue; }
+    if(ln.trim().startsWith("|")){ const t=[]; while(i<L.length && L[i].trim().startsWith("|")){ t.push(L[i]); i++; } h+=renderTable(t); continue; }
+    if(/^\d+\.\s/.test(ln)){ const it=[]; while(i<L.length && /^\d+\.\s/.test(L[i])){ it.push(L[i].replace(/^\d+\.\s/,'')); i++; } h+="<ol>"+it.map(x=>`<li>${inl(x)}</li>`).join("")+"</ol>"; continue; }
+    if(ln.trim()===""){ i++; continue; }
+    const isChoice=/^\s*[①②③④⑤]/.test(ln);
+    const cls = isChoice?"choice-line":(sec==="문제"?"qstem":"");
+    h+=`<p${cls?` class="${cls}"`:''}>${inl(ln)}</p>`; i++;
+  }
+  return h;
+}
+
+// ---------- dashboard ----------
+async function loadDash(){
+  $("#review").style.display="none"; $("#dash").style.display="block";
+  const d = await api("/api/overview");
+  const byRound = {};
+  for(const p of d.pages){ const k = p.round ?? "미분류"; (byRound[k]=byRound[k]||[]).push(p); }
+  let html = `<p class="muted">총 ${d.pages.length}p · 확정: ${Object.entries(d.finalized||{}).map(([k,v])=>k+"회 "+v).join(", ")||"0"}</p>`;
+  for(const k of Object.keys(byRound)){
+    html += `<div class="round-block"><h2>${k==="미분류"?"미분류(회차 판독 전)":k+"회"}</h2><div class="grid">`;
+    for(const p of byRound[k]){
+      const cls = p.n_questions? "done" : (p.has_draft? "draft":"");
+      html += `<div class="cell ${cls}" data-src="${p.src}" data-page="${p.page}">
+        <span class="pg">${p.src}-${String(p.page).padStart(3,"0")}</span>
+        <small>${p.n_questions? p.n_questions+"문" : (p.has_draft?"초안":"·")}</small></div>`;
+    }
+    html += `</div></div>`;
+  }
+  $("#dash").innerHTML = html;
+  document.querySelectorAll(".cell").forEach(c=>c.onclick=()=>openPage(c.dataset.src, +c.dataset.page));
+}
+
+// ---------- review ----------
+async function openPage(src, page){
+  cur = {src, page};
+  $("#dash").style.display="none"; $("#review").style.display="grid";
+  $("#scan").src = `/scan/${src}/${page}`;
+  applyZoom();
+  draft = await api(`/api/draft/${src}/${page}`);
+  $("#pRound").value = draft.round ?? "";
+  $("#pKey").value = draft.answer_key_line ?? "";
+  $("#ocrText").value = draft.ocr_text || "";
+  $("#ocrmeta").textContent = `${src}.pdf p.${page}`;
+  $("#pglabel").textContent = `${src}.pdf p.${page}` + (draft.round?` · ${draft.round}회`:"");
+  renderQuestions();
+  setStatus("불러옴");
+}
+
+function nextAssetId(q, prefix){ const A=q.assets||{}; let n=1; while(A[prefix+"-"+n]) n++; return prefix+"-"+n; }
+function assetsHtml(q, i){
+  const A=q.assets||{};
+  const rows=Object.keys(A).map(id=>{
+    const a=A[id]; let ed="";
+    if(a.type==='table')
+      ed=`<input type="text" data-asset="${i}|${id}|title" placeholder="표 제목(예: [Mytest], 없으면 비움)" value="${esc(a.title||'')}">
+          <textarea data-asset="${i}|${id}|md" placeholder="| 열1 | 열2 |&#10;| --- | --- |&#10;| 값 | 값 |  (셀 줄바꿈은 <br>)">${esc(a.md||'')}</textarea>`;
+    else if(a.type==='sql'||a.type==='box')
+      ed=`<textarea data-asset="${i}|${id}|text" placeholder="SELECT ... (코드박스, 엔터 개행 OK)">${esc(a.text||'')}</textarea>`;
+    else if(a.type==='text')
+      ed=`<textarea data-asset="${i}|${id}|text" placeholder="설명 텍스트 (박스 아닌 일반 텍스트, 줄바꿈은 <br>)">${esc(a.text||'')}</textarea>`;
+    else if(a.type==='figure'){ const src=figSrc(q,a);
+      ed=`<div class="figrow">${src?`<img src="${src}" style="max-height:80px">`:'<span class="muted">영역 미지정</span>'}
+          <button data-act="setfig" data-i="${i}" data-id="${id}">영역지정(드래그 후)</button>
+          <input type="text" data-asset="${i}|${id}|note" placeholder="설명" value="${esc(a.note||'')}" style="flex:1"></div>`; }
+    return `<div class="asset"><div class="arow">
+        <button class="tok" data-act="instok" data-i="${i}" data-id="${id}" title="발문에 삽입">{{${id}}}</button>
+        <span class="badge">${a.type}</span><div class="sp"></div>
+        <button data-act="delasset" data-i="${i}" data-id="${id}">✕</button></div>${ed}</div>`;
+  }).join("");
+  return `<div class="assets"><div class="ahead">자산(표/SQL박스/그림)
+      <button data-act="addt" data-i="${i}">＋표</button>
+      <button data-act="addb" data-i="${i}">＋SQL박스</button>
+      <button data-act="addx" data-i="${i}">＋텍스트</button>
+      <button data-act="addp" data-i="${i}">＋그림</button>
+      <span class="muted">토큰 {{t-1}} 을 발문·선지·해설에 넣으면 그 위치에 펼쳐집니다</span></div>
+    ${rows||'<span class="muted">자산 없음</span>'}</div>`;
+}
+function qCard(q, i){
+  const el = document.createElement("div"); el.className="q"+(q.verified?" verified":"");
+  el.innerHTML = `
+   <div class="row qhead">
+     <label>문항 <input type="number" data-f="question_no" data-i="${i}" value="${q.question_no??""}" style="width:52px"></label>
+     <label>과목 <input type="number" data-f="subject_no" data-i="${i}" value="${q.subject_no??""}" style="width:44px"></label>
+     <label>정답
+       <select data-f="answer" data-i="${i}">
+         <option value=""></option>${CIRC.map(c=>`<option ${q.answer===c?"selected":""}>${c}</option>`).join("")}
+       </select></label>
+     <label>난이도
+       <select data-f="difficulty" data-i="${i}">
+         <option value=""></option>${["하","중","상"].map(d=>`<option ${q.difficulty===d?"selected":""}>${d}</option>`).join("")}
+       </select></label>
+     <div class="sp"></div>
+     <label class="chk"><input type="checkbox" data-chk data-i="${i}" ${q.verified?'checked':''}> 대조완료</label>
+     <button data-act="save" data-i="${i}" class="ok">💾 저장</button>
+     <button data-act="addfig" data-i="${i}">그림 추가</button>
+     <button data-act="del" data-i="${i}">삭제</button>
+   </div>
+   <label class="muted">발문(문제)</label>
+   <textarea class="stem" data-f="stem" data-i="${i}" placeholder="발문(질문 문장)">${esc(q.stem||"")}</textarea>
+   <label class="muted">지문(자료 — 표/그림/SQL박스는 {{t-1}} 토큰으로 여기 배치)</label>
+   <textarea class="stem" data-f="jimun" data-i="${i}" placeholder="지문 자료 위치. 자산을 추가하면 여기에 {{t-1}} 토큰이 들어갑니다(발문과 분리)">${esc(q.jimun||"")}</textarea>
+   <div class="choices">${[0,1,2,3].map(c=>`
+     <div class="choice"><span>${CIRC[c]}</span><textarea rows="1" class="cta" data-f="choice${c}" data-i="${i}" placeholder="선지 (표/그림/SQL이면 {{t-1}} 토큰)">${esc((q.choices&&q.choices[c])||'')}</textarea></div>`).join("")}</div>
+   ${assetsHtml(q,i)}
+   <details open><summary>해설(선택)</summary><div class="small"><textarea data-f="explanation" data-i="${i}" placeholder="해설 (참고 표/그림도 {{t-1}} 토큰으로)">${esc(q.explanation||"")}</textarea></div></details>
+   <div class="row" style="margin-top:6px"><button data-act="preview" data-i="${i}">👁 미리보기</button><span class="muted">← 마크다운 몰라도 실제 렌더된 문제를 확인</span></div>
+   <div class="preview" style="display:none"></div>`;
+  return el;
+}
+
+function renderQuestions(){
+  const list = $("#qlist"); list.innerHTML="";
+  (draft.questions||[]).forEach((q,i)=>list.appendChild(qCard(q,i)));
+  // bind inputs
+  list.querySelectorAll("[data-f]").forEach(inp=>{
+    inp.onchange = ()=>{
+      const i=+inp.dataset.i, f=inp.dataset.f, v=inp.value;
+      const q=draft.questions[i];
+      if(f.startsWith("choice")){ q.choices=q.choices||["","","",""]; q.choices[+f.slice(6)]=v; }
+      else if(f==="question_no"||f==="subject_no"){ q[f]= v===""?null:+v; }
+      else { q[f]=v; }
+    };
+  });
+  list.querySelectorAll("[data-asset]").forEach(inp=>{
+    inp.oninput=()=>{ const [i,id,f]=inp.dataset.asset.split("|"); const a=(draft.questions[+i].assets||{})[id]; if(a) a[f]=inp.value; };
+  });
+  list.querySelectorAll("[data-act]").forEach(b=>{
+    b.onclick=async()=>{
+      const i=+b.dataset.i, act=b.dataset.act;
+      if(act==="save"){
+        const q=draft.questions[i];
+        q.round = q.round || +($("#pRound").value) || draft.round;
+        q.round_label = draft.round_label || `최신 기출문제 ${String(q.round).padStart(2,"0")}회`;
+        if(!q.round || !q.question_no){ alert("회차/문항번호를 입력하세요."); return; }
+        await saveDraft();
+        const res = await api("/api/finalize",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({src:cur.src,page:cur.page,questions:[q]})});
+        setStatus(`저장됨${q.verified?" ✓대조완료":" (미완료)"}: ${(res.saved||[]).join(", ")}`, true);
+        return;
+      }
+      if(act==="del"){ draft.questions.splice(i,1); renderQuestions(); }
+      else if(act==="addt"||act==="addb"||act==="addx"||act==="addfig"||act==="addp"){
+        const q=draft.questions[i]; q.assets=q.assets||{};
+        const pre = act==="addt"?"t":(act==="addb"?"b":(act==="addx"?"x":"p"));
+        const id=nextAssetId(q,pre);
+        if(pre==="t") q.assets[id]={type:"table",title:"",md:""};
+        else if(pre==="b") q.assets[id]={type:"sql",text:""};
+        else if(pre==="x") q.assets[id]={type:"text",text:""};
+        else { const a={type:"figure",note:"figure"}; if(pendingBox){a.bbox=pendingBox;pendingBox=null;$("#sel").style.display="none";} q.assets[id]=a; }
+        q.jimun=(q.jimun||"").replace(/\s*$/,"")+"\n\n{{"+id+"}}";
+        renderQuestions();
+      }
+      else if(act==="delasset"){
+        const q=draft.questions[i], id=b.dataset.id; delete (q.assets||{})[id];
+        const tok=new RegExp("\\{\\{"+id+"\\}\\}","g");
+        q.stem=(q.stem||"").replace(tok,"").replace(/\n{3,}/g,"\n\n").trim();
+        q.jimun=(q.jimun||"").replace(tok,"").replace(/\n{3,}/g,"\n\n").trim();
+        q.explanation=(q.explanation||"").replace(tok,"").trim();
+        q.choices=(q.choices||[]).map(c=>(c||"").replace(tok,""));
+        renderQuestions();
+      }
+      else if(act==="instok"){
+        const q=draft.questions[i], id=b.dataset.id;
+        q.jimun=(q.jimun||"").replace(/\s*$/,"")+"\n\n{{"+id+"}}"; renderQuestions();
+        setStatus("지문에 {{"+id+"}} 삽입 — 필요하면 선지/해설로 옮기세요");
+      }
+      else if(act==="setfig"){
+        const q=draft.questions[i], id=b.dataset.id;
+        if(!pendingBox){ alert("먼저 상단 '스캔 보기'로 이미지를 켠 뒤 영역을 드래그하세요."); return; }
+        q.assets[id].bbox=pendingBox; pendingBox=null; $("#sel").style.display="none"; renderQuestions();
+      }
+      else if(act==="preview"){
+        const pv=b.parentElement.nextElementSibling;
+        if(pv.style.display==="none"){ const q=draft.questions[i]; pv.innerHTML=`<div class="pv-qno">${q.question_no??''}</div>`+mdToHtml(questionToMd(q)); pv.style.display="block"; b.textContent="✕ 미리보기 닫기"; }
+        else { pv.style.display="none"; b.textContent="👁 미리보기"; }
+      }
+    };
+  });
+  list.querySelectorAll("[data-figplace]").forEach(sel=>{
+    sel.onchange=()=>{ draft.questions[+sel.dataset.i].figures[+sel.dataset.fi].placement = sel.value; };
+  });
+  list.querySelectorAll("[data-chk]").forEach(cb=>{
+    cb.onchange=async ()=>{
+      const q=draft.questions[+cb.dataset.i]; q.verified=cb.checked;
+      cb.closest(".q").classList.toggle("verified", cb.checked);
+      if(!q.round || !q.question_no){ setStatus("회차/문항번호 없어 저장 못함"); return; }
+      await saveDraft();
+      await api("/api/finalize",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({src:cur.src,page:cur.page,questions:[q]})});
+      setStatus((cb.checked?"✓대조완료":"대조완료 해제")+" 저장됨: "+q.question_no, true);
+    };
+  });
+  // 자동 높이: 모든 textarea가 내용 전체를 보이도록
+  const grow=el=>{ el.style.height="auto"; el.style.height=(el.scrollHeight+2)+"px"; };
+  list.querySelectorAll("textarea").forEach(t=>{ grow(t); t.addEventListener("input",()=>grow(t)); });
+}
+
+function addQuestion(){
+  draft.questions=draft.questions||[];
+  const last = draft.questions[draft.questions.length-1];
+  const nextNo = last && last.question_no ? last.question_no+1 : (draft.questions.length+1);
+  draft.questions.push({question_no:nextNo, round: +($("#pRound").value)||draft.round,
+    subject_no:null, stem:"", choices:["","","",""], answer:"", difficulty:"", figures:[]});
+  renderQuestions();
+}
+
+// ---------- answer key ----------
+function applyKey(){
+  const line = $("#pKey").value; draft.answer_key_line=line;
+  const map={}; const re=/(\d{1,2})\s*([①②③④⑤])/g; let m;
+  while((m=re.exec(line))){ map[+m[1]] = m[2]; }
+  for(const q of draft.questions){ if(q.question_no in map) q.answer=map[q.question_no]; }
+  renderQuestions(); setStatus("정답키 반영됨", true);
+}
+
+// ---------- drag select on image ----------
+(function(){
+  const wrap=$("#imgwrap"), img=$("#scan"), sel=$("#sel");
+  let sx,sy,drag=false;
+  wrap.addEventListener("mousedown",e=>{
+    if(e.target!==img) return;
+    const r=img.getBoundingClientRect(); sx=e.clientX-r.left; sy=e.clientY-r.top; drag=true;
+    sel.style.display="block"; sel.style.left=sx+"px"; sel.style.top=sy+"px"; sel.style.width="0"; sel.style.height="0";
+    e.preventDefault();
+  });
+  window.addEventListener("mousemove",e=>{
+    if(!drag) return;
+    const r=img.getBoundingClientRect(); let cx=e.clientX-r.left, cy=e.clientY-r.top;
+    const x=Math.min(sx,cx), y=Math.min(sy,cy), w=Math.abs(cx-sx), h=Math.abs(cy-sy);
+    sel.style.left=x+"px"; sel.style.top=y+"px"; sel.style.width=w+"px"; sel.style.height=h+"px";
+  });
+  window.addEventListener("mouseup",e=>{
+    if(!drag) return; drag=false;
+    const r=img.getBoundingClientRect();
+    const scale = img.naturalWidth / r.width;
+    const x=parseFloat(sel.style.left), y=parseFloat(sel.style.top),
+          w=parseFloat(sel.style.width), h=parseFloat(sel.style.height);
+    if(w<8||h<8){ sel.style.display="none"; return; }
+    pendingBox=[Math.round(x*scale),Math.round(y*scale),Math.round(w*scale),Math.round(h*scale)];
+    setStatus(`영역 선택됨 ${pendingBox.join(",")} → 문제의 [그림 추가]`);
+  });
+})();
+
+function applyZoom(){ $("#scan").style.width = ($("#zoom").value*100)+"%"; }
+$("#zoom").oninput=applyZoom;
+
+// ---------- actions ----------
+async function saveDraft(){
+  draft.round = +($("#pRound").value)||null; draft.answer_key_line=$("#pKey").value;
+  draft.ocr_text = $("#ocrText").value;
+  await api(`/api/draft/${cur.src}/${cur.page}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(draft)});
+  setStatus("초안 저장됨", true);
+}
+async function finalize(){
+  await saveDraft();
+  for(const q of draft.questions){ q.round = q.round || +($("#pRound").value); q.round_label = draft.round_label || `최신 기출문제 ${String(q.round).padStart(2,"0")}회`; }
+  const bad = draft.questions.filter(q=>!q.round || !q.question_no);
+  if(bad.length){ alert("회차/문항번호 없는 문제가 있습니다."); return; }
+  const res = await api("/api/finalize",{method:"POST",headers:{"Content-Type":"application/json"},
+     body:JSON.stringify({src:cur.src,page:cur.page,questions:draft.questions})});
+  setStatus(`확정 저장 ${res.saved.length}개`, true);
+}
+
+$("#btnScan").onclick=()=>$("#review").classList.toggle("showscan");
+$("#btnOcr").onclick=()=>{ const on=$("#review").classList.toggle("noocr"); $("#btnOcr").textContent = on?"OCR원문 펴기":"OCR원문 접기"; };
+$("#btnDash").onclick=loadDash;
+$("#btnAdd").onclick=addQuestion;
+$("#btnSaveDraft").onclick=saveDraft;
+$("#btnFinalize").onclick=finalize;
+$("#btnApplyKey").onclick=applyKey;
+$("#btnPrev").onclick=()=>cur&&openPage(cur.src, Math.max(1,cur.page-1));
+$("#btnNext").onclick=()=>cur&&openPage(cur.src, cur.page+1);
+loadDash();
+</script>
+</body>
+</html>

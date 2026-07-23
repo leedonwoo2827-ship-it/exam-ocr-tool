@@ -1,0 +1,12 @@
+# 파이썬
+.venv/
+__pycache__/
+*.pyc
+
+# 저작권 보호: 원본 PDF, 렌더 이미지, 추출한 verbatim 내용은 커밋하지 않음
+# (data/ 전체 = raw_pages 이미지 + ocr_draft 원문 + 작업 산출물)
+_context/*.pdf
+data/
+
+# 로그/임시
+*.log
